@@ -1004,7 +1004,7 @@ as FAT32, mountpoint /boot/efi and at least with 100MB of size." ${MSGBOXSIZE}
 }
 
 create_filesystems() {
-    local mnts dev mntpt fstype fspassno mkfs size rv uuid
+    local mnts dev mntpt fstype fspassno mkfs size rv uuid mounts list options subvolumes btrfsmntpt id vol
 
     mnts=$(grep -E '^MOUNTPOINT.*' $CONF_FILE)
     set -- ${mnts}
@@ -1055,16 +1055,56 @@ failed to create filesystem $fstype on $dev!\ncheck $LOG for errors." ${MSGBOXSI
                 DIE 1
             fi
         fi
+
         # Mount rootfs the first one.
         [ "$mntpt" != "/" ] && continue
         mkdir -p $TARGETDIR
         echo "Mounting $dev on $mntpt ($fstype)..." >$LOG
         mount -t $fstype $dev $TARGETDIR >$LOG 2>&1
+        
+        # make btrfs filesystem subvolumes
+        subvolumes="@ @home @root @tmp @var @local @opt @snapshots"
+        mounts="home usr/local tmp var .snapshots root var opt"
+        if [ "$fstype" = "btrfs" ]; then
+            for i in $subvolumes; do
+                btrfsmntpt=$(echo $i | sed 's/@//')
+                btrfs subvolume create $TARGETDIR/$i >$LOG 2>&1
+            done
+            for m in $mounts; do
+                echo "Creating folder $m on $TARGETDIR for subvolume mount points" >$LOG
+                mkdir -p $TARGETDIR/@/$m >$LOG 2>&1
+            done
+            echo "Unmounting $TARGETDIR to mount $fstype subvolumes" >$LOG
+            # unmount top dir
+            umount $TARGETDIR >$LOG 2>&1
+            for i in $subvolumes; do
+                id=$(echo $l | awk '{print $1}')
+                vol=$(echo $l | awk '{print $2}')
+                options="compress=lzo,subvol="
+                btrfsmntpt=$(echo $i | sed 's/@//;s/local/usr\/local/;s/snapshots/.snapshots/')
+                echo "Mounting $i on $TARGETDIR/$btrfsmntpt" >$LOG
+                mount -t $fstype -o defaults,compress=lzo,subvol=$i $dev $TARGETDIR/$btrfsmntpt >$LOG 2>&1
+            done
+            # add fstab entries
+            IFS=$'\n'
+            list=$(btrfs subvolume list $TARGETDIR | awk '{print $2,$9}')
+            for i in $list;do
+                uuid=$(blkid -o value -s UUID "$dev")
+                id=$(echo $i | awk '{print $1}')
+                vol=$(echo $i | awk '{print $2}')
+                btrfsmntpt=$(echo $vol | sed 's/@/\//;s/local/usr\/local/;s/snapshots/.snapshots/')
+                echo "adding entries to fstab for $vol" >$LOG
+                echo "UUID=$uuid $btrfsmntpt $fstype defaults,compress=lzo,subvolid=$id,subvol=$vol 0 0" >>$TARGET_FSTAB
+            done
+            unset IFS
+        fi
+
         if [ $? -ne 0 ]; then
             DIALOG --msgbox "${BOLD}${RED}ERROR:${RESET} \
 failed to mount $dev on ${mntpt}! check $LOG for errors." ${MSGBOXSIZE}
             DIE 1
         fi
+
         # Add entry to target fstab
         uuid=$(blkid -o value -s UUID "$dev")
         if [ "$fstype" = "f2fs" ]; then
@@ -1072,7 +1112,9 @@ failed to mount $dev on ${mntpt}! check $LOG for errors." ${MSGBOXSIZE}
         else
             fspassno=1
         fi
-        echo "UUID=$uuid $mntpt $fstype defaults 0 $fspassno" >>$TARGET_FSTAB
+        if [ ! "$fstype" == "btrfs" ];then
+            echo "UUID=$uuid $mntpt $fstype defaults 0 $fspassno" >>$TARGET_FSTAB
+        fi
     done
 
     # mount all filesystems in target rootfs
@@ -1127,7 +1169,8 @@ umount_filesystems() {
         fi
     done
     echo "Unmounting $TARGETDIR..." >$LOG
-    umount $TARGETDIR >$LOG 2>&1
+    # unmount btrfs subvolumes
+    umount -R $TARGETDIR >$LOG 2>&1
 }
 
 log_and_count() {
