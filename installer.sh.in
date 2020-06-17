@@ -1063,8 +1063,8 @@ failed to create filesystem $fstype on $dev!\ncheck $LOG for errors." ${MSGBOXSI
         mount -t $fstype $dev $TARGETDIR >$LOG 2>&1
         
         # make btrfs filesystem subvolumes
-        subvolumes="@ @home @root @tmp @var @local @opt @snapshots"
-        mounts="home usr/local tmp var .snapshots root var opt"
+        subvolumes="@ @home @root @tmp @var @local @opt"
+        mounts="home usr/local tmp var root var opt"
         if [ "$fstype" = "btrfs" ]; then
             for i in $subvolumes; do
                 btrfsmntpt=$(echo $i | sed 's/@//')
@@ -1081,7 +1081,7 @@ failed to create filesystem $fstype on $dev!\ncheck $LOG for errors." ${MSGBOXSI
                 id=$(echo $l | awk '{print $1}')
                 vol=$(echo $l | awk '{print $2}')
                 options="compress=lzo,subvol="
-                btrfsmntpt=$(echo $i | sed 's/@//;s/local/usr\/local/;s/snapshots/.snapshots/')
+                btrfsmntpt=$(echo $i | sed 's/@//;s/local/usr\/local/')
                 echo "Mounting $i on $TARGETDIR/$btrfsmntpt" >$LOG
                 mount -t $fstype -o defaults,compress=lzo,subvol=$i $dev $TARGETDIR/$btrfsmntpt >$LOG 2>&1
             done
@@ -1092,7 +1092,7 @@ failed to create filesystem $fstype on $dev!\ncheck $LOG for errors." ${MSGBOXSI
                 uuid=$(blkid -o value -s UUID "$dev")
                 id=$(echo $i | awk '{print $1}')
                 vol=$(echo $i | awk '{print $2}')
-                btrfsmntpt=$(echo $vol | sed 's/@/\//;s/local/usr\/local/;s/snapshots/.snapshots/')
+                btrfsmntpt=$(echo $vol | sed 's/@/\//;s/local/usr\/local/')
                 echo "adding entries to fstab for $vol" >$LOG
                 echo "UUID=$uuid $btrfsmntpt $fstype defaults,compress=lzo,subvolid=$id,subvol=$vol 0 0" >>$TARGET_FSTAB
             done
